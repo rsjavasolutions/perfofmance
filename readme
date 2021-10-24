@@ -1,0 +1,92 @@
+swagger 3.0
+
+http://localhost:8080/swagger-ui/index.html#/
+
+12:25
+13:20 dlaczego left join
+https://www.youtube.com/watch?v=WIMCuNYfdE4&t=450s&ab_channel=MateuszD%C4%85browski
+________________________________________________________________________________________________
+
+Jeden Person ma wiele Carów
+
+Relacja OneToMany dwukierunkowa
+
+public class PersonEntity {
+    @OneToMany(mappedBy = "person", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<CarEntity> cars = new HashSet<>();
+}
+
+public class CarEntity {
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "person_id")
+}
+
+przy standardowym pobraniu wszystkich Personów wraz z Carami które posiadają wpadamy w problem N + 1
+im więcej Personów w bazie tym więcej zapytań i spadek wydajności.
+
+@GetMapping("with-cars")
+public List<PersonResponseWithCars> getPeopleWithCars() {
+     return personService.getPeople();
+}
+
+personRepository.findAll() -> jeżeli w bazie jest zapisanych 5 personów to wykona sie 6 selectów (N + 1)
+
+jeżeli pobieram wszystkich personów ale już bez Carów (PersonResponse już bez Carów), działa lazy loading który w relacji OneToMany jest defaultowo na Lazy
+i wykonuje się tylko jedno zapytanie.
+
+****ROZWIĄZANIE PROBLEMU****
+
+    @Query("SELECT p FROM PersonEntity p " +
+            "left join fetch p.cars")
+    Set<PersonEntity> findAllPeople();
+
+"left join fetch" bo chce pobrać wyszystkich Personów niezależnie czy mają komentarze czy nie
+jeżeli zrobię zwykłego joina bez left, to nie pobierze Pesona który nie ma Carów (Zdziśka)
+jeżeli zrobię inner join, to też pobierze tylko Personów z Carami (nie pobierze zdziśka)
+
+kolejny problem to zapytanie findByUuid(String uuid) - wykonają sie dwa zapytania N + 1 = 2
+
+trzeba również napisać własne zapytanie i wtedy wykona sie tylko jedno zapytanie do bazy
+    @Query("SELECT p FROM PersonEntity p " +
+            "left join fetch p.cars " +
+            "WHERE p.uuid =:uuid")
+    Optional<PersonEntity> findByUuid(@Param("uuid") String uuid);
+
+ważne żeby dać left joina bo jak będzie inner to nie znajdzie Persona który nie będzie miał powiązanych Carów
+________________________________________________________________________________________________
+
+Relacja ManyToOne dwukierunkowe powiązanie. Każdy Car wie o Personie do jakiego jest przypisany
+W takim przypaku jeżeli wywołam carRepository.findAll() znów będzie problem N +1, zamiast
+jednego SQL wygeneruje sie tyle ile jest Carów w bazie + 1
+
+@ManyToOne()
+@JoinColumn(name = "person_id")
+    private PersonEntity person;
+
+****ROZWIĄZANIE PROBLEMU**** (jeżeli pobieram same Cary bez zaciagania jakich kolwiek danych z personów)
+jeżeli pobieram wszystkie Cary ale bez Personów to wystarczy dodać FetchType.LAZY, wtedy hibernate wygeneruje jedno zapytanie
+
+@ManyToOne(fetch = FetchType.LAZY)
+
+Jeżeli zmienię jednak CarResponse żeby zwracał też np person_uuid to trzeba napisać zapytanie bo znów wystąpi N + 1;
+
+ @Query("SELECT c FROM CarEntity c " +
+            "left join fetch c.person")
+    Set<CarEntity> findAll();
+
+Tylko w CarMapperze trzeba zrobić spawdzenie żę jak CarEntity getPersonEntity == null to ustawiać poszczególne pola na NULL
+
+Żeby pobrać tylko Cary z powiązanymi Personami trzeba napisać zwykłego joina
+
+    @Query("SELECT c FROM CarEntity c " +
+            "join fetch c.person")
+    Set<CarEntity> findAll();
+
+________________________________________________________________________________________________
+
+
+
+
+
+
+
